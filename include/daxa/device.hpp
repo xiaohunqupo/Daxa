@@ -11,6 +11,9 @@
 
 namespace daxa
 {
+    static constexpr inline u32 MAX_COMPUTE_QUEUE_COUNT = 8u;
+    static constexpr inline u32 MAX_TRANSFER_QUEUE_COUNT = 2u;
+
     enum struct DeviceType
     {
         OTHER = 0,
@@ -206,6 +209,8 @@ namespace daxa
         Optional<RayTracingPipelineProperties> ray_tracing_properties = {};
         Optional<AccelerationStructureProperties> acceleration_structure_properties = {};
         Optional<InvocationReorderProperties> invocation_reorder_properties = {};
+        u32 compute_queue_count;
+        u32 transfer_queue_count;
     };
 
     DAXA_EXPORT_CXX auto default_device_score(DeviceProperties const & device_props) -> i32;
@@ -270,8 +275,27 @@ namespace daxa
         SmallString name = {};
     };
 
+    struct Queue
+    {
+        QueueFamily family = {};
+        u32 index = {};
+    };
+
+    static constexpr inline Queue QUEUE_MAIN = Queue{ QueueFamily::MAIN, 0 };
+    static constexpr inline Queue QUEUE_COMPUTE_0 = Queue{ QueueFamily::COMPUTE, 0 };
+    static constexpr inline Queue QUEUE_COMPUTE_1 = Queue{ QueueFamily::COMPUTE, 1 };
+    static constexpr inline Queue QUEUE_COMPUTE_2 = Queue{ QueueFamily::COMPUTE, 2 };
+    static constexpr inline Queue QUEUE_COMPUTE_3 = Queue{ QueueFamily::COMPUTE, 3 };
+    static constexpr inline Queue QUEUE_COMPUTE_4 = Queue{ QueueFamily::COMPUTE, 4 };
+    static constexpr inline Queue QUEUE_COMPUTE_5 = Queue{ QueueFamily::COMPUTE, 5 };
+    static constexpr inline Queue QUEUE_COMPUTE_6 = Queue{ QueueFamily::COMPUTE, 6 };
+    static constexpr inline Queue QUEUE_COMPUTE_7 = Queue{ QueueFamily::COMPUTE, 7 };
+    static constexpr inline Queue QUEUE_TRANSFER_0 = Queue{ QueueFamily::TRANSFER, 0 };
+    static constexpr inline Queue QUEUE_TRANSFER_1 = Queue{ QueueFamily::TRANSFER, 1 };
+
     struct CommandSubmitInfo
     {
+        Queue queue = daxa::QUEUE_MAIN;
         PipelineStageFlags wait_stages = {};
         std::span<ExecutableCommandList const> command_lists = {};
         std::span<BinarySemaphore const> wait_binary_semaphores = {};
@@ -284,6 +308,7 @@ namespace daxa
     {
         std::span<BinarySemaphore const> wait_binary_semaphores = {};
         Swapchain swapchain;
+        Queue queue = QUEUE_MAIN;
     };
 
     struct MemoryBlockBufferInfo
@@ -402,6 +427,8 @@ namespace daxa
 
         [[nodiscard]] auto create_swapchain(SwapchainInfo const & info) -> Swapchain;
         [[nodiscard]] auto create_command_recorder(CommandRecorderInfo const & info) -> CommandRecorder;
+        [[nodiscard]] auto create_compute_command_recorder(CommandRecorderInfo const & info) -> ComputeCommandRecorder;
+        [[nodiscard]] auto create_transfer_command_recorder(CommandRecorderInfo const & info) -> TransferCommandRecorder;
         [[nodiscard]] auto create_binary_semaphore(BinarySemaphoreInfo const & info) -> BinarySemaphore;
         [[nodiscard]] auto create_timeline_semaphore(TimelineSemaphoreInfo const & info) -> TimelineSemaphore;
         [[nodiscard]] auto create_event(EventInfo const & info) -> Event;
@@ -412,6 +439,9 @@ namespace daxa
         /// @return reference to info of object.
         [[nodiscard]] auto info() const -> DeviceInfo const &;
         void wait_idle();
+
+        void queue_wait_idle(Queue queue);
+        auto queue_count(QueueFamily queue_count) -> u32;
 
         void submit_commands(CommandSubmitInfo const & submit_info);
         void present_frame(PresentInfo const & info);

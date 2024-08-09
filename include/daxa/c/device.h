@@ -9,6 +9,9 @@
 #include <daxa/c/swapchain.h>
 #include <daxa/c/sync.h>
 
+#define DAXA_MAX_COMPUTE_QUEUE_COUNT 8u
+#define DAXA_MAX_TRANSFER_QUEUE_COUNT 2u
+
 typedef enum
 {
     DAXA_DEVICE_TYPE_OTHER = 0,
@@ -209,6 +212,8 @@ typedef struct
     daxa_Optional(daxa_RayTracingPipelineProperties) ray_tracing_pipeline_properties;
     daxa_Optional(daxa_AccelerationStructureProperties) acceleration_structure_properties;
     daxa_Optional(daxa_RayTracingInvocationReorderProperties) ray_tracing_invocation_reorder_properties;
+    daxa_u32 compute_queue_count;
+    daxa_u32 transfer_queue_count;
 } daxa_DeviceProperties;
 
 DAXA_EXPORT int32_t
@@ -256,6 +261,25 @@ static daxa_DeviceInfo const DAXA_DEFAULT_DEVICE_INFO = {
 
 typedef struct
 {
+    daxa_QueueFamily family;
+    daxa_u32 index;
+} daxa_Queue;
+
+static daxa_Queue const DAXA_QUEUE_MAIN = { DAXA_QUEUE_FAMILY_MAIN, 0 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_0 = { DAXA_QUEUE_FAMILY_COMPUTE, 0 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_1 = { DAXA_QUEUE_FAMILY_COMPUTE, 1 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_2 = { DAXA_QUEUE_FAMILY_COMPUTE, 2 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_3 = { DAXA_QUEUE_FAMILY_COMPUTE, 3 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_4 = { DAXA_QUEUE_FAMILY_COMPUTE, 4 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_5 = { DAXA_QUEUE_FAMILY_COMPUTE, 5 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_6 = { DAXA_QUEUE_FAMILY_COMPUTE, 6 };
+static daxa_Queue const DAXA_QUEUE_COMPUTE_7 = { DAXA_QUEUE_FAMILY_COMPUTE, 7 };
+static daxa_Queue const DAXA_QUEUE_TRANSFER_0 = { DAXA_QUEUE_FAMILY_TRANSFER, 0 };
+static daxa_Queue const DAXA_QUEUE_TRANSFER_1 = { DAXA_QUEUE_FAMILY_TRANSFER, 1 };
+
+typedef struct
+{
+    daxa_Queue queue;
     VkPipelineStageFlags wait_stages;
     daxa_ExecutableCommandList const * command_lists;
     uint64_t command_list_count;
@@ -276,6 +300,7 @@ typedef struct
     daxa_BinarySemaphore const * wait_binary_semaphores;
     uint64_t wait_binary_semaphore_count;
     daxa_Swapchain swapchain;
+    daxa_Queue queue;
 } daxa_PresentInfo;
 
 static daxa_PresentInfo const DAXA_DEFAULT_PRESENT_INFO = DAXA_ZERO_INIT;
@@ -441,6 +466,11 @@ DAXA_EXPORT VkDevice
 daxa_dvc_get_vk_device(daxa_Device device);
 DAXA_EXPORT VkPhysicalDevice
 daxa_dvc_get_vk_physical_device(daxa_Device device);
+
+DAXA_EXPORT DAXA_NO_DISCARD daxa_Result
+daxa_dvc_queue_wait_idle(daxa_Device device, daxa_Queue queue);
+DAXA_EXPORT DAXA_NO_DISCARD daxa_Result
+daxa_dvc_queue_count(daxa_Device device, daxa_QueueFamily queue_family, daxa_u32 * out_value);
 
 DAXA_EXPORT DAXA_NO_DISCARD daxa_Result
 daxa_dvc_wait_idle(daxa_Device device);

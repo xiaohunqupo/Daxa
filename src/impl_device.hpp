@@ -11,6 +11,8 @@
 
 #include <daxa/c/device.h>
 
+#include <atomic>
+
 using namespace daxa;
 
 struct SubmitZombie
@@ -18,6 +20,11 @@ struct SubmitZombie
     std::vector<daxa_BinarySemaphore> binary_semaphores = {};
     std::vector<daxa_TimelineSemaphore> timeline_semaphores = {};
 };
+
+static inline constexpr u64 MAX_PENDING_SUBMISSIONS_PER_QUEUE = 64;
+static inline constexpr u64 MAIN_QUEUE_INDEX = 0;
+static inline constexpr u64 FIRST_COMPUTE_QUEUE_IDX = 1;
+static inline constexpr u64 FIRST_TRANSFER_QUEUE_IDX = FIRST_COMPUTE_QUEUE_IDX + DAXA_MAX_COMPUTE_QUEUE_COUNT;
 
 struct daxa_ImplDevice final : public ImplHandle
 {
@@ -73,37 +80,82 @@ struct daxa_ImplDevice final : public ImplHandle
     VmaAllocation vk_null_image_vma_allocation = {};
 
     // Command Buffer/Pool recycling:
-    std::mutex main_queue_command_pool_buffer_recycle_mtx = {};
-    CommandPoolPool buffer_pool_pool = {};
+    // Index with daxa_QueueFamily.
+    std::array<CommandPoolPool, 3> command_pool_pools = {};
 
     // Gpu Shader Resource Object table:
     GPUShaderResourceTable gpu_sro_table = {};
 
-    // Main queue:
-    VkQueue main_queue_vk_queue = {};
-    u32 main_queue_family_index = {};
-    // Timelines are used to track how far ahead the gpu is before the cpu.
-    // This difference between timelines is used to delay resource destruction.
-    // Resources are destroyed when the gpu timeline reaches the value of the cpu timeline at the destruction of the resource.
-    // This check is performed in collect_garbage, which is either manually called or automatically in submit, present or the device destruction.
-    std::atomic_uint64_t main_queue_cpu_timeline = {};
-    VkSemaphore vk_main_queue_gpu_timeline_semaphore = {};
-    // When a resources refcount reaches 0 it becomes a zombie. A zombie is `metadata required for destruction` + `cpu timeline value at the point in time of destruction`.
-    // collect_garbage checks if the gpu timeline reached the zombies timeline value and destroys the zombies.
-    // TODO: replace with lockless queues.
-    std::recursive_mutex main_queue_zombies_mtx = {};
-    std::deque<std::pair<u64, CommandRecorderZombie>> main_queue_command_list_zombies = {};
-    std::deque<std::pair<u64, BufferId>> main_queue_buffer_zombies = {};
-    std::deque<std::pair<u64, ImageId>> main_queue_image_zombies = {};
-    std::deque<std::pair<u64, ImageViewId>> main_queue_image_view_zombies = {};
-    std::deque<std::pair<u64, SamplerId>> main_queue_sampler_zombies = {};
-    std::deque<std::pair<u64, TlasId>> main_queue_tlas_zombies = {};
-    std::deque<std::pair<u64, BlasId>> main_queue_blas_zombies = {};
-    std::deque<std::pair<u64, SemaphoreZombie>> main_queue_semaphore_zombies = {};
-    std::deque<std::pair<u64, EventZombie>> main_queue_split_barrier_zombies = {};
-    std::deque<std::pair<u64, PipelineZombie>> main_queue_pipeline_zombies = {};
-    std::deque<std::pair<u64, TimelineQueryPoolZombie>> main_queue_timeline_query_pool_zombies = {};
-    std::deque<std::pair<u64, MemoryBlockZombie>> main_queue_memory_block_zombies = {};
+    // Every submit to any queue increments the global submit timeline
+    // Each queue stores a mapping between local submit index and global submit index for each of their in flight submits.
+    // When destroying a resource it becomes a zombie, the zombie remembers the current global timeline value.
+    // When collect garbage is called, the zombies timeline values are compared against submits running in all queues.
+    // If the zombies global submit index is smaller then global index of all submits currently in flight (on all queues), we can safely clean the resource up.
+    std::atomic_uint64_t global_submit_timeline = {};
+    std::recursive_mutex zombies_mtx = {};
+    std::deque<std::pair<u64, CommandRecorderZombie>> command_list_zombies = {};
+    std::deque<std::pair<u64, BufferId>> buffer_zombies = {};
+    std::deque<std::pair<u64, ImageId>> image_zombies = {};
+    std::deque<std::pair<u64, ImageViewId>> image_view_zombies = {};
+    std::deque<std::pair<u64, SamplerId>> sampler_zombies = {};
+    std::deque<std::pair<u64, TlasId>> tlas_zombies = {};
+    std::deque<std::pair<u64, BlasId>> blas_zombies = {};
+    std::deque<std::pair<u64, SemaphoreZombie>> semaphore_zombies = {};
+    std::deque<std::pair<u64, EventZombie>> split_barrier_zombies = {};
+    std::deque<std::pair<u64, PipelineZombie>> pipeline_zombies = {};
+    std::deque<std::pair<u64, TimelineQueryPoolZombie>> timeline_query_pool_zombies = {};
+    std::deque<std::pair<u64, MemoryBlockZombie>> memory_block_zombies = {};
+
+    // Used to sync access to the queues submits in flight lists.
+    std::recursive_mutex queue_mtx = {};
+    // Queues
+    struct ImplQueue
+    {
+        daxa_QueueFamily family = {};
+        u32 queue_index = {};
+        u32 vk_queue_family_index = ~0u;
+        VkQueue vk_queue = {};
+        VkSemaphore gpu_queue_local_timeline = {};
+        u64 cpu_queue_local_timeline = {};
+        /// WARNING: In flight submit queues must be synchronized with queue_mtx!
+        ///          This is because collect garbage (which pops from the pending_submits) can race with
+        ///          submit operation running on another thread (which pushes into pending_submits)
+        // Stores the global submission index of all in flight submits in the order they were made on this queue
+        std::deque<u64> pending_submits = {};
+
+        auto initialize(VkDevice vk_device, u32 queue_family_index, u32 queue_index) -> daxa_Result;
+        void cleanup(VkDevice device);
+        auto update_pending_submits(VkDevice vk_device) -> daxa_Result;
+        auto wait_for_oldest_pending_submit(VkDevice vk_device) -> daxa_Result;
+        void add_pending_submit(u64 current_device_timeline_value);
+        auto get_oldest_pending_submit() -> std::optional<u64>;
+    };
+    std::array<ImplQueue, DAXA_MAX_COMPUTE_QUEUE_COUNT + DAXA_MAX_TRANSFER_QUEUE_COUNT + 1> queues = {
+        ImplQueue{DAXA_QUEUE_FAMILY_MAIN, 0},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 0},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 1},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 2},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 3},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 4},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 5},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 6},
+        ImplQueue{DAXA_QUEUE_FAMILY_COMPUTE, 7},
+        ImplQueue{DAXA_QUEUE_FAMILY_TRANSFER, 0},
+        ImplQueue{DAXA_QUEUE_FAMILY_TRANSFER, 1},
+    };
+
+    auto get_queue(daxa_Queue queue) -> ImplQueue&;
+    auto valid_queue(daxa_Queue queue) -> bool;
+
+    struct ImplQueueFamily
+    {
+        u32 queue_count = {};
+        u32 vk_index = ~0u;
+    };
+    std::array<ImplQueueFamily, 3> queue_families = {};
+
+    std::array<u32,3> valid_vk_queue_families = {};
+    u32 valid_vk_queue_family_count = {};
 
     auto validate_image_slice(daxa_ImageMipArraySlice const & slice, daxa_ImageId id) -> daxa_ImageMipArraySlice;
     auto validate_image_slice(daxa_ImageMipArraySlice const & slice, daxa_ImageViewId id) -> daxa_ImageMipArraySlice;

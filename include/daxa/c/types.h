@@ -4,6 +4,8 @@
 #include <vulkan/vulkan.h>
 #include <daxa/c/core.h>
 
+// TODO:    Rename errors based on their fatality!
+//          DAXA_RESULT_FATAL_ERROR should be the prefix for unrecoverable errors.
 typedef enum
 {
     DAXA_RESULT_SUCCESS = 0,
@@ -111,6 +113,12 @@ typedef enum
     DAXA_RESULT_PUSHCONSTANT_RANGE_EXCEEDED = (1 << 30) + 59,
     DAXA_RESULT_MESH_SHADER_NOT_DEVICE_ENABLED = (1 << 30) + 60,
     DAXA_RESULT_ERROR_COPY_OUT_OF_BOUNDS = (1 << 30) + 61,
+    DAXA_RESULT_ERROR_NO_GRAPHICS_QUEUE_FOUND = (1 << 30) + 62,
+    DAXA_RESULT_ERROR_COULD_NOT_QUERY_QUEUE = (1 << 30) + 63,
+    DAXA_RESULT_ERROR_INVALID_QUEUE = (1 << 30) + 64,
+    DAXA_RESULT_ERROR_CMD_LIST_SUBMIT_QUEUE_FAMILY_MISMATCH = (1 << 30) + 65,
+    DAXA_RESULT_ERROR_PRESENT_QUEUE_FAMILY_MISMATCH = (1 << 30) + 66,
+    DAXA_RESULT_ERROR_INVALID_QUEUE_FAMILY = (1 << 30) + 67,
     DAXA_RESULT_MAX_ENUM = 0x7FFFFFFF,
 } daxa_Result;
 
@@ -227,5 +235,13 @@ DAXA_EXPORT uint64_t
 daxa_timeline_query_pool_inc_refcnt(daxa_TimelineQueryPool timeline_query_pool);
 DAXA_EXPORT uint64_t
 daxa_timeline_query_pool_dec_refcnt(daxa_TimelineQueryPool timeline_query_pool);
+
+typedef enum
+{
+    DAXA_QUEUE_FAMILY_MAIN,
+    DAXA_QUEUE_FAMILY_COMPUTE,
+    DAXA_QUEUE_FAMILY_TRANSFER,
+    DAXA_QUEUE_FAMILY_MAX_ENUM
+} daxa_QueueFamily;
 
 #endif // #ifndef __DAXA_TYPES_H__

@@ -6,6 +6,14 @@
 #include <daxa/c/gpu_resources.h>
 #include <daxa/c/pipeline.h>
 
+/// TODO: investigate software command recording
+///   Might allow us some optimizations
+///   Allows for easier verification
+///   Allows for more predictable performance (move all vk recording ops to tight place in code)
+
+/// WARNING:
+///   Checks for command types against queue family only performed in c++ api!!
+
 typedef struct
 {
     void const * data;
@@ -15,8 +23,11 @@ typedef struct
 
 typedef struct
 {
+    daxa_QueueFamily queue_family;
     daxa_SmallString name;
 } daxa_CommandRecorderInfo;
+
+static daxa_CommandRecorderInfo const DAXA_DEFAULT_COMMAND_RECORDER_INFO = DAXA_ZERO_INIT;
 
 typedef struct
 {

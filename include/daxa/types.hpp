@@ -8,6 +8,7 @@
 #include <array>
 #include <concepts>
 #include <span>
+#include <limits>
 
 #include <daxa/core.hpp>
 
@@ -1843,4 +1844,13 @@ namespace daxa
         ALLOW_REORDER = 1,
         MAX_ENUM = 0x7fffffff,
     };
+
+    enum struct QueueFamily
+    {
+        MAIN,
+        COMPUTE,
+        TRANSFER
+    };
+
+    auto to_string(QueueFamily family) -> std::string_view;
 } // namespace daxa
